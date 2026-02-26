@@ -13,7 +13,8 @@ import {
   Code,
   Layout,
   ArrowLeft,
-  Search
+  Search,
+  Sparkles
 } from 'lucide-react';
 import { Exam, Question, Submission } from './types';
 import { generateQuestions, suggestTopics } from './services/geminiService';
@@ -124,20 +125,20 @@ const RecruiterDashboard = ({ onNewExam, onBack, onViewResults }: { onNewExam: (
               <ArrowLeft size={16} />
               <span className="text-sm font-medium">Back to Home</span>
             </button>
-            <h2 className="text-4xl font-serif italic text-zinc-900">Recruiter Dashboard</h2>
+            <h2 className="text-4xl font-serif italic text-zinc-900">Recruitment Hub</h2>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
               <input
                 type="text"
-                placeholder="Search exams..."
+                placeholder="Search roles..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-4 py-2 bg-white border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-all w-64"
               />
             </div>
-            <Button onClick={onNewExam} icon={Plus}>Create New Exam</Button>
+            <Button onClick={onNewExam} icon={Plus}>Create Job Role</Button>
           </div>
         </div>
 
@@ -330,23 +331,23 @@ const CreateExamView = ({ onCancel, onSave }: { onCancel: () => void; onSave: ()
 
         <Card className="p-8 space-y-6">
           <div className="space-y-2">
-            <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Exam Title</label>
+            <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Job Role / Position</label>
             <input 
               value={title}
               onChange={e => setTitle(e.target.value)}
-              placeholder="e.g. Senior Java Developer Assessment"
+              placeholder="e.g. Senior Python Developer"
               className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-all"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Topic (AI Generation)</label>
+              <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Technical Topics</label>
               <div className="relative">
                 <input 
                   value={topic}
                   onChange={e => setTopic(e.target.value)}
-                  placeholder={isSuggesting ? "Suggesting topics..." : "e.g. React & TypeScript"}
+                  placeholder={isSuggesting ? "Suggesting topics..." : "e.g. Django, Fast API, SQL"}
                   className={`w-full px-4 py-3 rounded-xl border border-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-900 transition-all ${isSuggesting ? 'opacity-50' : ''}`}
                 />
                 <button 
@@ -370,7 +371,7 @@ const CreateExamView = ({ onCancel, onSave }: { onCancel: () => void; onSave: ()
           </div>
 
           <div className="space-y-4">
-            <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Questions ({questions.length})</label>
+            <label className="text-xs font-mono uppercase tracking-widest text-zinc-400">Sample Questions ({questions.length})</label>
             <div className="space-y-3">
               {questions.map((q, idx) => (
                 <div key={idx} className="p-4 bg-zinc-50 border border-zinc-200 rounded-xl flex gap-4">
@@ -390,10 +391,11 @@ const CreateExamView = ({ onCancel, onSave }: { onCancel: () => void; onSave: ()
               ))}
               {questions.length === 0 && (
                 <div className="py-12 text-center border-2 border-dashed border-zinc-200 rounded-2xl">
-                  <p className="text-zinc-400 text-sm">Enter a topic and click the brain icon to generate questions with AI.</p>
+                  <p className="text-zinc-400 text-sm">Enter technical topics and click the brain icon to see sample questions.</p>
                 </div>
               )}
             </div>
+            <p className="text-[10px] text-zinc-400 italic">Note: These are sample questions. Each candidate will receive a unique set of 20 questions generated on-the-fly based on your topics.</p>
           </div>
 
           <div className="pt-6 border-t border-zinc-100 flex justify-end gap-3">
@@ -412,6 +414,9 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
   const [candidateName, setCandidateName] = useState('');
   const [candidateEmail, setCandidateEmail] = useState('');
   const [isStarted, setIsStarted] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [sessionQuestions, setSessionQuestions] = useState<Question[]>([]);
   const [currentQuestionIdx, setCurrentQuestionIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [timeLeft, setTimeLeft] = useState(0);
@@ -438,10 +443,38 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
     }
   }, [isStarted, timeLeft]);
 
-  const handleStart = (exam: Exam) => {
-    setSelectedExam(exam);
-    setTimeLeft(exam.duration * 60);
-    setIsStarted(true);
+  const handleStart = async (exam: Exam) => {
+    setIsGenerating(true);
+    setGenerationError(null);
+    try {
+      // Generate unique questions for this candidate based on exam description/topic
+      let topic = exam.description.replace('Exam on ', '').trim();
+      if (!topic || topic.length < 3) {
+        topic = exam.title;
+      }
+      // If still too short, add some context
+      if (topic.length < 5) {
+        topic = `${topic} Technical Assessment`;
+      }
+      
+      const generated = await generateQuestions(topic, 20);
+      
+      if (!generated || generated.length === 0) {
+        throw new Error("No questions were generated. Please try again.");
+      }
+
+      const questionsWithIds = generated.map(q => ({ ...q, id: crypto.randomUUID() })) as Question[];
+      
+      setSessionQuestions(questionsWithIds);
+      setSelectedExam(exam);
+      setTimeLeft(exam.duration * 60);
+      setIsStarted(true);
+    } catch (error: any) {
+      console.error("Failed to generate unique questions:", error);
+      setGenerationError(error.message || "Failed to prepare your unique exam. This might be due to a temporary connection issue.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -455,6 +488,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
         exam_id: selectedExam.id,
         candidate_name: candidateName,
         candidate_email: candidateEmail,
+        questions: sessionQuestions,
         answers
       })
     });
@@ -462,22 +496,72 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
   };
 
   if (isSubmitted) {
+    const isDirectLink = !!new URLSearchParams(window.location.search).get('examId');
     return (
-      <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-6">
-        <Card className="max-w-md w-full p-12 text-center space-y-6">
-          <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle2 size={40} />
-          </div>
-          <h2 className="text-3xl font-serif italic">Submission Successful</h2>
-          <p className="text-zinc-600">Your exam has been submitted for evaluation. The recruitment team will contact you soon.</p>
-          <Button onClick={onBack} className="w-full">Return to Home</Button>
-        </Card>
+      <div className="min-h-screen bg-[#E4E3E0] flex items-center justify-center p-6 text-center">
+        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+          <Card className="max-w-md w-full p-12 space-y-6">
+            <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 size={40} />
+            </div>
+            <h2 className="text-3xl font-serif italic">Congratulations, your exam is complete</h2>
+            <p className="text-zinc-600">Your assessment has been successfully submitted. You may now close this window.</p>
+            {!isDirectLink ? (
+              <Button onClick={onBack} className="w-full">Return to Home</Button>
+            ) : (
+              <Button onClick={() => window.close()} className="w-full">Close Window</Button>
+            )}
+          </Card>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (isGenerating || generationError) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F4] flex items-center justify-center p-6">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center max-w-md space-y-6">
+          {isGenerating ? (
+            <>
+              <div className="w-20 h-20 border-4 border-zinc-200 border-t-zinc-900 rounded-full animate-spin mx-auto relative">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Sparkles size={24} className="text-zinc-400 animate-pulse" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-600 text-[10px] font-bold uppercase tracking-wider mb-2">
+                  <Sparkles size={10} />
+                  Gemini AI Powered
+                </div>
+                <h2 className="text-2xl font-serif italic">Preparing Your Unique Exam</h2>
+                <p className="text-zinc-500 text-sm">Crafting a custom set of questions just for you...</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+                <AlertCircle size={40} />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-2xl font-serif italic text-red-600">Generation Failed</h2>
+                <p className="text-zinc-500 text-sm">{generationError}</p>
+              </div>
+              <div className="pt-4 flex flex-col gap-3">
+                <Button onClick={() => selectedExam && handleStart(selectedExam)} className="w-full">Try Again</Button>
+                <Button variant="secondary" onClick={() => {
+                  setGenerationError(null);
+                  setSelectedExam(null);
+                }} className="w-full">Go Back</Button>
+              </div>
+            </>
+          )}
+        </motion.div>
       </div>
     );
   }
 
   if (isStarted && selectedExam) {
-    const q = selectedExam.questions?.[currentQuestionIdx];
+    const q = sessionQuestions[currentQuestionIdx];
     if (!q) return <div className="p-20 text-center">Loading questions...</div>;
     
     const formatTime = (s: number) => {
@@ -509,13 +593,13 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
             <Card className="p-4">
               <h4 className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 mb-4">Questions</h4>
               <div className="grid grid-cols-4 gap-2">
-                {selectedExam.questions.map((_, idx) => (
+                {sessionQuestions.map((_, idx) => (
                   <button
                     key={idx}
                     onClick={() => setCurrentQuestionIdx(idx)}
                     className={`w-full aspect-square rounded-lg border flex items-center justify-center text-xs font-mono transition-all
                       ${currentQuestionIdx === idx ? 'bg-zinc-900 text-white border-zinc-900' : 
-                        answers[selectedExam.questions[idx].id] ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-zinc-200 text-zinc-400 hover:border-zinc-400'}`}
+                        answers[sessionQuestions[idx].id] ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-zinc-200 text-zinc-400 hover:border-zinc-400'}`}
                   >
                     {idx + 1}
                   </button>
@@ -530,7 +614,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
             <Card className="p-8 min-h-[500px] flex flex-col">
               <div className="flex justify-between items-start mb-6">
                 <span className="text-[10px] font-mono uppercase tracking-widest px-2 py-1 bg-zinc-100 rounded text-zinc-500">
-                  Question {currentQuestionIdx + 1} of {selectedExam.questions.length}
+                  Question {currentQuestionIdx + 1} of {sessionQuestions.length}
                 </span>
                 <span className="text-xs font-mono text-zinc-400">{q.points} Points</span>
               </div>
@@ -580,16 +664,16 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
                   Previous
                 </Button>
                 <Button 
-                  variant={currentQuestionIdx === selectedExam.questions.length - 1 ? 'primary' : 'secondary'}
+                  variant={currentQuestionIdx === sessionQuestions.length - 1 ? 'primary' : 'secondary'}
                   onClick={() => {
-                    if (currentQuestionIdx < selectedExam.questions.length - 1) {
+                    if (currentQuestionIdx < sessionQuestions.length - 1) {
                       setCurrentQuestionIdx(prev => prev + 1);
                     } else {
                       handleSubmit();
                     }
                   }}
                 >
-                  {currentQuestionIdx === selectedExam.questions.length - 1 ? 'Finish' : 'Next Question'}
+                  {currentQuestionIdx === sessionQuestions.length - 1 ? 'Finish' : 'Next Question'}
                 </Button>
               </div>
             </Card>
@@ -603,7 +687,10 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
     <div className="min-h-screen bg-[#F5F5F4] p-8">
       <div className="max-w-4xl mx-auto">
         <div className="mb-12">
-          <button onClick={onBack} className="flex items-center gap-2 text-zinc-500 hover:text-zinc-900 mb-4 transition-colors">
+          <button 
+            onClick={onBack} 
+            className={`flex items-center gap-2 text-zinc-500 hover:text-zinc-900 mb-4 transition-colors ${new URLSearchParams(window.location.search).get('examId') ? 'invisible' : ''}`}
+          >
             <ArrowLeft size={16} />
             <span className="text-sm font-medium">Back to Home</span>
           </button>
@@ -639,7 +726,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
 
           <div className="md:col-span-2 space-y-4">
             <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-400">
-              {selectedExam ? "Selected Exam" : "Available Exams"}
+              {selectedExam ? "Selected Position" : "Available Positions"}
             </h3>
             <div className="space-y-3">
               {selectedExam ? (
@@ -663,10 +750,10 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
                       </div>
                     </div>
                     <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
-                      <label className="text-[10px] font-mono uppercase text-zinc-400 block mb-1">Questions</label>
+                      <label className="text-[10px] font-mono uppercase text-zinc-400 block mb-1">Assessment</label>
                       <div className="flex items-center gap-2 text-zinc-900 font-medium">
                         <Users size={16} />
-                        {selectedExam.questions?.length || 0} Items
+                        Unique AI Session
                       </div>
                     </div>
                   </div>
@@ -685,7 +772,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
                       onClick={() => setSelectedExam(null)}
                       className="w-full text-xs font-mono text-zinc-400 hover:text-zinc-900 transition-colors"
                     >
-                      Change Exam
+                      Change Position
                     </button>
                   )}
                 </Card>
@@ -697,7 +784,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
                         <h4 className="font-medium text-zinc-900 mb-1">{exam.title}</h4>
                         <div className="flex items-center gap-3 text-xs text-zinc-400 font-mono">
                           <span className="flex items-center gap-1"><Clock size={12} /> {exam.duration}m</span>
-                          <span className="flex items-center gap-1"><ClipboardList size={12} /> {exam.questions?.length || 0} Questions</span>
+                          <span className="text-emerald-600 font-bold">AI Dynamic Session</span>
                         </div>
                       </div>
                       <Button 
@@ -705,7 +792,7 @@ const CandidatePortal = ({ onBack }: { onBack: () => void }) => {
                         onClick={() => setSelectedExam(exam)}
                         icon={ChevronRight}
                       >
-                        Select
+                        Select Role
                       </Button>
                     </Card>
                   ))}
@@ -825,7 +912,7 @@ const ResultsView = ({ exam, onBack }: { exam: Exam; onBack: () => void }) => {
                       </div>
 
                       <div className="space-y-4">
-                        {exam.questions?.map((q, idx) => {
+                        {(selectedSubmission.questions as Question[] || []).map((q, idx) => {
                           const answer = (selectedSubmission.answers as any)[q.id];
                           const isCorrect = q.type === 'mcq' && answer === q.correct_answer;
 
@@ -875,24 +962,26 @@ const ResultsView = ({ exam, onBack }: { exam: Exam; onBack: () => void }) => {
 export default function App() {
   const [view, setView] = useState<'landing' | 'recruiter' | 'candidate' | 'create-exam' | 'results'>('landing');
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [isDirectExamLink, setIsDirectExamLink] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const examId = params.get('examId');
     if (examId) {
       setView('candidate');
+      setIsDirectExamLink(true);
     }
   }, []);
 
   return (
     <div className="font-sans text-zinc-900 selection:bg-zinc-900 selection:text-white">
       <AnimatePresence mode="wait">
-        {view === 'landing' && (
+        {view === 'landing' && !isDirectExamLink && (
           <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <LandingView onSelectRole={role => setView(role)} />
           </motion.div>
         )}
-        {view === 'recruiter' && (
+        {view === 'recruiter' && !isDirectExamLink && (
           <motion.div key="recruiter" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <RecruiterDashboard 
               onNewExam={() => setView('create-exam')} 
@@ -904,12 +993,12 @@ export default function App() {
             />
           </motion.div>
         )}
-        {view === 'create-exam' && (
+        {view === 'create-exam' && !isDirectExamLink && (
           <motion.div key="create-exam" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <CreateExamView onCancel={() => setView('recruiter')} onSave={() => setView('recruiter')} />
           </motion.div>
         )}
-        {view === 'results' && selectedExam && (
+        {view === 'results' && selectedExam && !isDirectExamLink && (
           <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <ResultsView exam={selectedExam} onBack={() => setView('recruiter')} />
           </motion.div>

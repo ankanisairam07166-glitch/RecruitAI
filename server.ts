@@ -35,6 +35,7 @@ db.exec(`
     exam_id TEXT NOT NULL,
     candidate_name TEXT NOT NULL,
     candidate_email TEXT NOT NULL,
+    questions TEXT NOT NULL, -- JSON array of questions for this session
     answers TEXT NOT NULL, -- JSON object
     score INTEGER,
     status TEXT DEFAULT 'pending', -- 'pending', 'completed'
@@ -100,32 +101,30 @@ async function startServer() {
   });
 
   app.post("/api/submissions", (req, res) => {
-    const { id, exam_id, candidate_name, candidate_email, answers } = req.body;
+    const { id, exam_id, candidate_name, candidate_email, questions, answers } = req.body;
     
-    // Fetch questions to calculate score
-    const questions = db.prepare("SELECT * FROM questions WHERE exam_id = ?").all(exam_id);
     let totalPoints = 0;
     let earnedPoints = 0;
 
     for (const q of questions) {
-      totalPoints += q.points;
+      totalPoints += q.points || 0;
       const candidateAnswer = answers[q.id];
       if (q.type === 'mcq' && candidateAnswer === q.correct_answer) {
-        earnedPoints += q.points;
+        earnedPoints += q.points || 0;
       }
-      // Coding questions remain pending for manual or AI review
     }
 
     const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
 
-    const insert = db.prepare("INSERT INTO submissions (id, exam_id, candidate_name, candidate_email, answers, score, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    insert.run(id, exam_id, candidate_name, candidate_email, JSON.stringify(answers), score, 'completed');
+    const insert = db.prepare("INSERT INTO submissions (id, exam_id, candidate_name, candidate_email, questions, answers, score, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    insert.run(id, exam_id, candidate_name, candidate_email, JSON.stringify(questions), JSON.stringify(answers), score, 'completed');
     res.json({ success: true, score });
   });
 
   app.get("/api/submissions/:exam_id", (req, res) => {
     const submissions = db.prepare("SELECT * FROM submissions WHERE exam_id = ?").all(req.params.exam_id).map((s: any) => ({
       ...s,
+      questions: s.questions ? JSON.parse(s.questions) : [],
       answers: s.answers ? JSON.parse(s.answers) : {}
     }));
     res.json(submissions);
