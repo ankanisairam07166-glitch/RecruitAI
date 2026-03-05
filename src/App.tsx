@@ -14,7 +14,8 @@ import {
   Layout,
   ArrowLeft,
   Search,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import { Exam, Question, Submission } from './types';
 import { generateQuestions, suggestTopics } from './services/geminiService';
@@ -116,8 +117,53 @@ const RecruiterDashboard = ({ onNewExam, onBack, onViewResults }: { onNewExam: (
     exam.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string) => {
+    console.log(`Frontend: Requesting delete for exam ${id}`);
+    try {
+      const res = await fetch(`/api/exams/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        console.log(`Frontend: Successfully deleted exam ${id}`);
+        setExams(prev => prev.filter(e => e.id !== id));
+        setDeletingId(null);
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Server failed to delete');
+      }
+    } catch (error: any) {
+      console.error('Failed to delete exam:', error);
+      alert(`Failed to delete assessment: ${error.message}`);
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F4] p-8">
+      <AnimatePresence>
+        {deletingId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+          >
+            <Card className="max-w-sm w-full p-8 space-y-6 shadow-2xl">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
+                <Trash2 size={32} />
+              </div>
+              <div className="text-center space-y-2">
+                <h3 className="text-xl font-serif italic">Delete Assessment?</h3>
+                <p className="text-zinc-500 text-sm">This will permanently remove all questions and candidate results. This action cannot be undone.</p>
+              </div>
+              <div className="flex gap-3">
+                <Button onClick={() => setDeletingId(null)} variant="secondary" className="flex-1">Cancel</Button>
+                <Button onClick={() => handleDelete(deletingId)} variant="danger" className="flex-1">Delete</Button>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-end mb-12">
           <div>
@@ -149,16 +195,28 @@ const RecruiterDashboard = ({ onNewExam, onBack, onViewResults }: { onNewExam: (
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {filteredExams.map(exam => (
-              <Card key={exam.id} className="hover:border-zinc-400 transition-colors cursor-pointer group flex flex-col">
+              <Card key={exam.id} className="hover:border-zinc-400 transition-colors cursor-pointer group flex flex-col relative">
                 <div className="p-6 flex-1">
                   <div className="flex justify-between items-start mb-4">
                     <div className="p-2 bg-zinc-100 rounded-lg text-zinc-600">
                       <ClipboardList size={20} />
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400">
-                        ID: {exam.id.slice(0, 8)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono uppercase tracking-widest text-zinc-400">
+                          ID: {exam.id.slice(0, 8)}
+                        </span>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingId(exam.id);
+                          }}
+                          className="p-2 text-zinc-400 hover:text-red-500 transition-colors bg-zinc-50 rounded-full hover:bg-red-50"
+                          title="Delete Assessment"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
@@ -226,8 +284,10 @@ const CreateExamView = ({ onCancel, onSave }: { onCancel: () => void; onSave: ()
         try {
           const suggestions = await suggestTopics(title);
           setTopic(suggestions);
-        } catch (error) {
+        } catch (error: any) {
           console.error("Failed to suggest topics:", error);
+          // Don't alert here as it's an automatic background process, 
+          // but we can log it for developers.
         } finally {
           setIsSuggesting(false);
         }
@@ -243,8 +303,9 @@ const CreateExamView = ({ onCancel, onSave }: { onCancel: () => void; onSave: ()
     try {
       const generated = await generateQuestions(topic, 20);
       setQuestions(generated.map((q, i) => ({ ...q, id: crypto.randomUUID() })));
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
+      alert(error.message || "Failed to generate questions. Please check your AI configuration.");
     } finally {
       setIsGenerating(false);
     }

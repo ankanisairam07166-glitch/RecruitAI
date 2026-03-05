@@ -1,19 +1,41 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Question } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const apiKey = process.env.GEMINI_API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
+
+function checkApiKey() {
+  if (!apiKey || apiKey === "undefined" || apiKey === "null") {
+    console.error("GEMINI_API_KEY is missing. AI features will not work.");
+    return false;
+  }
+  return true;
+}
 
 export async function suggestTopics(title: string): Promise<string> {
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Suggest a comma-separated list of technical topics or keywords for an exam titled: "${title}". 
-    The output should be a single string of keywords, e.g., "React, TypeScript, Hooks, State Management".`,
-  });
+  if (!checkApiKey()) {
+    throw new Error("AI configuration is missing. Please set the GEMINI_API_KEY environment variable.");
+  }
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Suggest a comma-separated list of technical topics or keywords for an exam titled: "${title}". 
+      The output should be a single string of keywords, e.g., "React, TypeScript, Hooks, State Management".`,
+    });
 
-  return response.text || "";
+    return response.text || "";
+  } catch (error: any) {
+    console.error("Gemini suggestTopics error:", error);
+    throw new Error(error.message || "Failed to suggest topics. Please check your API key and connection.");
+  }
 }
 
 export async function generateQuestions(topic: string, count: number): Promise<Partial<Question>[]> {
+  if (!checkApiKey()) {
+    throw new Error("AI configuration is missing. Please set the GEMINI_API_KEY environment variable.");
+  }
+
   const batchSize = 5;
   const batches = Math.ceil(count / batchSize);
   const allQuestions: Partial<Question>[] = [];

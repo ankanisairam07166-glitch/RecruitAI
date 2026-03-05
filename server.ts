@@ -44,6 +44,18 @@ db.exec(`
   );
 `);
 
+// Migration: Ensure 'questions' column exists in 'submissions'
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(submissions)").all();
+  const hasQuestionsColumn = tableInfo.some((col: any) => col.name === 'questions');
+  if (!hasQuestionsColumn) {
+    db.exec("ALTER TABLE submissions ADD COLUMN questions TEXT DEFAULT '[]'");
+    console.log("Migration: Added 'questions' column to 'submissions' table");
+  }
+} catch (error) {
+  console.error("Migration failed:", error);
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -100,6 +112,30 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.delete("/api/exams/:id", (req, res) => {
+    const { id } = req.params;
+    console.log(`Attempting to delete exam: ${id}`);
+    
+    try {
+      const deleteExam = db.prepare("DELETE FROM exams WHERE id = ?");
+      const deleteQuestions = db.prepare("DELETE FROM questions WHERE exam_id = ?");
+      const deleteSubmissions = db.prepare("DELETE FROM submissions WHERE exam_id = ?");
+
+      const transaction = db.transaction(() => {
+        const s = deleteSubmissions.run(id);
+        const q = deleteQuestions.run(id);
+        const e = deleteExam.run(id);
+        console.log(`Deleted: ${s.changes} submissions, ${q.changes} questions, ${e.changes} exam`);
+      });
+
+      transaction();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Delete exam failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/submissions", (req, res) => {
     const { id, exam_id, candidate_name, candidate_email, questions, answers } = req.body;
     
@@ -133,7 +169,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, host: "0.0.0.0", allowedHosts: true},
       appType: "spa",
     });
     app.use(vite.middlewares);
